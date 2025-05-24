@@ -2,9 +2,9 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
-
+const verificarToken = require('../middlewares/authMiddleware');
 // Crear recibo con cheques
-router.post('/', async (req, res) => {
+router.post('/', verificarToken, async (req, res) => {
   const {
     numero,
     fecha,
@@ -81,7 +81,7 @@ router.post('/', async (req, res) => {
 });
 
 // GET /api/recibos?tipo=cobro o tipo=pago
-router.get('/', async (req, res) => {
+router.get('/', verificarToken, async (req, res) => {
   const { tipo } = req.query;
 
   if (!tipo || (tipo !== 'cobro' && tipo !== 'pago')) {
@@ -109,7 +109,7 @@ router.get('/', async (req, res) => {
   }
 });
 // GET /api/recibos/:id
-router.get('/:id', async (req, res) => {
+router.get('/:id', verificarToken, async (req, res) => {
   const reciboId = req.params.id;
 
   try {
@@ -146,7 +146,7 @@ router.get('/:id', async (req, res) => {
   }
 });
 // editar
-router.put('/:id', async (req, res) => {
+router.put('/:id', verificarToken, async (req, res) => {
   const reciboId = req.params.id;
   const {
     numero,
@@ -235,7 +235,7 @@ router.put('/:id', async (req, res) => {
   }
 });
 // eliminar
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', verificarToken, async (req, res) => {
   const reciboId = req.params.id;
 
   try {

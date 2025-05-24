@@ -16,6 +16,7 @@ app.use('/api/clientes', require('./Routes/clientes'));
 app.use('/api/proveedores', require('./Routes/proveedores'));
 app.use('/api/facturas', require('./Routes/facturas'));
 app.use('/api/recibos', require('./Routes/recibos'));
+app.use('/api/balance', require('./Routes/balance'));
 
 
 

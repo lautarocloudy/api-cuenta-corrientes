@@ -2,9 +2,9 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
-
+const verificarToken = require('../middlewares/authMiddleware');
 // Crear factura con ítems
-router.post('/', async (req, res) => {
+router.post('/', verificarToken, async (req, res) => {
     const { numero, fecha, tipo, cliente_id, proveedor_id, items } = req.body;
 
     if (!numero || !fecha || !tipo || !items || items.length === 0) {
@@ -61,7 +61,7 @@ router.post('/', async (req, res) => {
 });
 
 // GET /api/facturas?tipo=venta o tipo=compra
-router.get('/', async (req, res) => {
+router.get('/', verificarToken, async (req, res) => {
     const { tipo } = req.query;
 
     if (!tipo || (tipo !== 'venta' && tipo !== 'compra')) {
@@ -90,7 +90,7 @@ router.get('/', async (req, res) => {
 });
 
 // GET /api/facturas/:id
-router.get('/:id', async (req, res) => {
+router.get('/:id', verificarToken, async (req, res) => {
     const facturaId = req.params.id;
 
     try {
@@ -127,7 +127,7 @@ router.get('/:id', async (req, res) => {
     }
 });
 
-router.put('/:id', async (req, res) => {
+router.put('/:id', verificarToken, async (req, res) => {
   const facturaId = req.params.id;
   const { numero, fecha, tipo, cliente_id, proveedor_id, items } = req.body;
 
@@ -181,7 +181,7 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', verificarToken, async (req, res) => {
   const facturaId = req.params.id;
   try {
     const result = await pool.query('DELETE FROM facturas WHERE id = $1 RETURNING *', [facturaId]);

@@ -3,9 +3,10 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db');
 const bcrypt = require('bcrypt');
+const verificarToken = require('../middlewares/authMiddleware');
 
 // Obtener todos los usuarios
-router.get('/', async (req, res) => {
+router.get('/', verificarToken, async (req, res) => {
   try {
     const result = await pool.query('SELECT id, nombre, email, rol FROM usuarios ORDER BY id');
     res.json(result.rows);
@@ -16,7 +17,7 @@ router.get('/', async (req, res) => {
 });
 
 // Obtener un usuario por ID
-router.get('/:id', async (req, res) => {
+router.get('/:id', verificarToken, async (req, res) => {
   try {
     const result = await pool.query('SELECT id, nombre, email, rol FROM usuarios WHERE id = $1', [req.params.id]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Usuario no encontrado' });
@@ -28,7 +29,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // Crear un nuevo usuario (igual a /register pero separado)
-router.post('/', async (req, res) => {
+router.post('/', verificarToken, async (req, res) => {
   const { nombre, email, contraseña, rol } = req.body;
   if (!nombre || !email || !contraseña) {
     return res.status(400).json({ error: 'Nombre, email y contraseña son requeridos' });
@@ -53,7 +54,7 @@ router.post('/', async (req, res) => {
 });
 
 // Actualizar usuario
-router.put('/:id', async (req, res) => {
+router.put('/:id', verificarToken, async (req, res) => {
   const { nombre, email, rol } = req.body;
   try {
     const result = await pool.query(
@@ -69,7 +70,7 @@ router.put('/:id', async (req, res) => {
 });
 
 // Eliminar usuario
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', verificarToken, async (req, res) => {
   try {
     const result = await pool.query('DELETE FROM usuarios WHERE id = $1 RETURNING *', [req.params.id]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Usuario no encontrado' });
@@ -80,7 +81,7 @@ router.delete('/:id', async (req, res) => {
   }
 });
 // Establecer nueva contraseña sin pedir la actual
-router.put('/:id/set-password', async (req, res) => {
+router.put('/:id/set-password', verificarToken, async (req, res) => {
     const { nueva } = req.body;
     const id = req.params.id;
   
