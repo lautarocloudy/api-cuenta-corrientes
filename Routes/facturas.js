@@ -5,60 +5,62 @@ const pool = require('../db');
 const verificarToken = require('../middlewares/authMiddleware');
 // Crear factura con ítems
 router.post('/', verificarToken, async (req, res) => {
-    const { numero, fecha, tipo, cliente_id, proveedor_id, items } = req.body;
+  const { numero, fecha, tipo, cliente_id, proveedor_id, detalles } = req.body;
+  const items = detalles || []; // para asegurar compatibilidad
 
-    if (!numero || !fecha || !tipo || !items || items.length === 0) {
-        return res.status(400).json({ error: 'Faltan datos obligatorios o no hay ítems.' });
-    }
+  if (!numero || !fecha || !tipo || !items || items.length === 0) {
+    return res.status(400).json({ error: 'Faltan datos obligatorios o no hay ítems.' });
+  }
 
-    if (tipo !== 'venta' && tipo !== 'compra') {
-        return res.status(400).json({ error: 'El tipo debe ser "venta" o "compra".' });
-    }
+  if (tipo !== 'venta' && tipo !== 'compra') {
+    return res.status(400).json({ error: 'El tipo debe ser "venta" o "compra".' });
+  }
 
-    if (tipo === 'venta' && !cliente_id) {
-        return res.status(400).json({ error: 'cliente_id requerido para tipo "venta".' });
-    }
+  if (tipo === 'venta' && !cliente_id) {
+    return res.status(400).json({ error: 'cliente_id requerido para tipo "venta".' });
+  }
 
-    if (tipo === 'compra' && !proveedor_id) {
-        return res.status(400).json({ error: 'proveedor_id requerido para tipo "compra".' });
-    }
+  if (tipo === 'compra' && !proveedor_id) {
+    return res.status(400).json({ error: 'proveedor_id requerido para tipo "compra".' });
+  }
 
-    const subtotal = items.reduce((acc, item) => acc + item.cantidad * item.precio_unitario, 0);
-    const iva = subtotal * 0.21;
-    const total = subtotal + iva;
+  const subtotal = items.reduce((acc, item) => acc + item.cantidad * item.precio, 0);
+  const iva = subtotal * 0.21;
+  const total = subtotal + iva;
 
-    const client = await pool.connect();
+  const client = await pool.connect();
 
-    try {
-        await client.query('BEGIN');
+  try {
+    await client.query('BEGIN');
 
-        const facturaResult = await client.query(
-            `INSERT INTO facturas (numero, fecha, tipo, cliente_id, proveedor_id, subtotal, iva, total)
+    const facturaResult = await client.query(
+      `INSERT INTO facturas (numero, fecha, tipo, cliente_id, proveedor_id, subtotal, iva, total)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-            [numero, fecha, tipo, cliente_id || null, proveedor_id || null, subtotal, iva, total]
-        );
+      [numero, fecha, tipo, cliente_id || null, proveedor_id || null, subtotal, iva, total]
+    );
 
-        const facturaId = facturaResult.rows[0].id;
+    const facturaId = facturaResult.rows[0].id;
 
-        for (const item of items) {
-            await client.query(
-                `INSERT INTO factura_items (factura_id, descripcion, cantidad, precio_unitario)
+    for (const item of items) {
+      await client.query(
+        `INSERT INTO factura_items (factura_id, descripcion, cantidad, precio_unitario)
          VALUES ($1, $2, $3, $4)`,
-                [facturaId, item.descripcion, item.cantidad, item.precio_unitario]
-            );
-        }
-
-        await client.query('COMMIT');
-
-        res.json({ mensaje: 'Factura creada correctamente', facturaId });
-    } catch (err) {
-        await client.query('ROLLBACK');
-        console.error(err);
-        res.status(500).json({ error: 'Error al crear la factura.' });
-    } finally {
-        client.release();
+        [facturaId, item.descripcion, item.cantidad, item.precio]
+      );
     }
+
+    await client.query('COMMIT');
+    res.json({ mensaje: 'Factura creada correctamente', facturaId });
+
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error(err);
+    res.status(500).json({ error: 'Error al crear la factura.' });
+  } finally {
+    client.release();
+  }
 });
+
 
 // GET /api/facturas?tipo=venta o tipo=compra
 router.get('/', verificarToken, async (req, res) => {
@@ -118,7 +120,7 @@ router.get('/:id', verificarToken, async (req, res) => {
             [facturaId]
         );
 
-        factura.items = itemsResult.rows;
+        factura.detalles = itemsResult.rows; 
 
         res.json(factura);
     } catch (err) {
@@ -129,7 +131,8 @@ router.get('/:id', verificarToken, async (req, res) => {
 
 router.put('/:id', verificarToken, async (req, res) => {
   const facturaId = req.params.id;
-  const { numero, fecha, tipo, cliente_id, proveedor_id, items } = req.body;
+  const { numero, fecha, tipo, cliente_id, proveedor_id, detalles } = req.body;
+  const items = detalles || []; // compatibilidad
 
   if (!numero || !fecha || !tipo || !items || items.length === 0) {
     return res.status(400).json({ error: 'Faltan datos obligatorios o ítems vacíos.' });
@@ -147,7 +150,7 @@ router.put('/:id', verificarToken, async (req, res) => {
     return res.status(400).json({ error: 'proveedor_id requerido para tipo "compra".' });
   }
 
-  const subtotal = items.reduce((acc, item) => acc + item.cantidad * item.precio_unitario, 0);
+  const subtotal = items.reduce((acc, item) => acc + item.cantidad * item.precio, 0);
   const iva = subtotal * 0.21;
   const total = subtotal + iva;
 
@@ -156,7 +159,9 @@ router.put('/:id', verificarToken, async (req, res) => {
     await client.query('BEGIN');
 
     await client.query(
-      `UPDATE facturas SET numero=$1, fecha=$2, tipo=$3, cliente_id=$4, proveedor_id=$5, subtotal=$6, iva=$7, total=$8 WHERE id=$9`,
+      `UPDATE facturas 
+       SET numero=$1, fecha=$2, tipo=$3, cliente_id=$4, proveedor_id=$5, subtotal=$6, iva=$7, total=$8 
+       WHERE id=$9`,
       [numero, fecha, tipo, cliente_id || null, proveedor_id || null, subtotal, iva, total, facturaId]
     );
 
@@ -166,7 +171,7 @@ router.put('/:id', verificarToken, async (req, res) => {
       await client.query(
         `INSERT INTO factura_items (factura_id, descripcion, cantidad, precio_unitario)
          VALUES ($1, $2, $3, $4)`,
-        [facturaId, item.descripcion, item.cantidad, item.precio_unitario]
+        [facturaId, item.descripcion, item.cantidad, item.precio]
       );
     }
 
@@ -180,6 +185,7 @@ router.put('/:id', verificarToken, async (req, res) => {
     client.release();
   }
 });
+
 
 router.delete('/:id', verificarToken, async (req, res) => {
   const facturaId = req.params.id;
