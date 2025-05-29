@@ -1,8 +1,8 @@
-// routes/recibos.js
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
 const verificarToken = require('../middlewares/authMiddleware');
+
 // Crear recibo con cheques
 router.post('/', verificarToken, async (req, res) => {
   const {
@@ -16,14 +16,15 @@ router.post('/', verificarToken, async (req, res) => {
     transferencia,
     otros,
     observaciones,
-    cheques
   } = req.body;
+const cheques = req.body.cheques || req.body.cheque || [];
 
   if (!fecha || !tipo || (tipo !== 'cobro' && tipo !== 'pago')) {
     return res.status(400).json({ error: 'Tipo o fecha inválidos.' });
   }
 
   if (tipo === 'cobro' && !cliente_id) {
+    console.log(cliente_id);
     return res.status(400).json({ error: 'cliente_id requerido para "cobro".' });
   }
 
@@ -60,11 +61,12 @@ router.post('/', verificarToken, async (req, res) => {
     const reciboId = reciboResult.rows[0].id;
 
     if (cheques && cheques.length > 0) {
-      for (const cheque of cheques) {
+      for (const chequeItem of cheques) {
+        const tipoCheque = chequeItem.tipo.charAt(0).toUpperCase() + chequeItem.tipo.slice(1).toLowerCase();
         await client.query(
           `INSERT INTO recibo_cheques (recibo_id, tipo, fecha_cobro, banco, numero, monto)
            VALUES ($1, $2, $3, $4, $5, $6)`,
-          [reciboId, cheque.tipo, cheque.fecha_cobro, cheque.banco, cheque.numero, cheque.monto]
+          [reciboId, tipoCheque, chequeItem.fechaCobro, chequeItem.banco, chequeItem.numero, chequeItem.monto]
         );
       }
     }
@@ -80,7 +82,8 @@ router.post('/', verificarToken, async (req, res) => {
   }
 });
 
-// GET /api/recibos?tipo=cobro o tipo=pago
+
+// Obtener recibos por tipo
 router.get('/', verificarToken, async (req, res) => {
   const { tipo } = req.query;
 
@@ -108,7 +111,8 @@ router.get('/', verificarToken, async (req, res) => {
     res.status(500).json({ error: 'Error al obtener recibos.' });
   }
 });
-// GET /api/recibos/:id
+
+// Obtener recibo por ID
 router.get('/:id', verificarToken, async (req, res) => {
   const reciboId = req.params.id;
 
@@ -145,7 +149,8 @@ router.get('/:id', verificarToken, async (req, res) => {
     res.status(500).json({ error: 'Error al obtener el recibo.' });
   }
 });
-// editar
+
+// Editar recibo con cheques
 router.put('/:id', verificarToken, async (req, res) => {
   const reciboId = req.params.id;
   const {
@@ -219,7 +224,7 @@ router.put('/:id', verificarToken, async (req, res) => {
         await client.query(
           `INSERT INTO recibo_cheques (recibo_id, tipo, fecha_cobro, banco, numero, monto)
            VALUES ($1, $2, $3, $4, $5, $6)`,
-          [reciboId, cheque.tipo, cheque.fecha_cobro, cheque.banco, cheque.numero, cheque.monto]
+          [reciboId, cheque.tipo, cheque.fechaCobro, cheque.banco, cheque.numero, cheque.monto]
         );
       }
     }
@@ -234,7 +239,8 @@ router.put('/:id', verificarToken, async (req, res) => {
     client.release();
   }
 });
-// eliminar
+
+// Eliminar recibo
 router.delete('/:id', verificarToken, async (req, res) => {
   const reciboId = req.params.id;
 
