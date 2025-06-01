@@ -1,13 +1,12 @@
-// index.js
 const express = require('express');
 const cors = require('cors');
-require('dotenv').config(); // carga variables de .env
-const db = require('./db');
+require('dotenv').config();
+const supabase = require('./supabaseClient'); // tu archivo con createClient
+
 const app = express();
 
-// Middleware
 app.use(cors());
-app.use(express.json()); // para leer JSON en los requests
+app.use(express.json());
 
 // Rutas
 app.use('/api/auth', require('./Routes/auth')); // para login
@@ -27,6 +26,6 @@ const PORT = process.env.PORT || 4000;
 // });
 
 module.exports = app;
-db.query('SELECT NOW()')
-  .then(res => console.log('Conexión OK:', res.rows[0]))
-  .catch(err => console.error('Error de conexión:', err));
+// db.query('SELECT NOW()')
+//   .then(res => console.log('Conexión OK:', res.rows[0]))
+//   .catch(err => console.error('Error de conexión:', err));
