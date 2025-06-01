@@ -8,8 +8,14 @@ const verificarToken = require('../middlewares/authMiddleware');
 router.get('/clientes', verificarToken, async (req, res) => {
   try {
     const facturas = await pool.query(`
-      SELECT c.id AS cliente_id, c.nombre, 
-             COALESCE(SUM(f.total), 0) AS total_facturado
+      SELECT c.id AS cliente_id, c.nombre,
+        COALESCE(SUM(
+          CASE 
+            WHEN f.tipo_f IN ('factura', 'nota de débito') THEN f.total
+            WHEN f.tipo_f = 'nota de crédito' THEN -f.total
+            ELSE 0
+          END
+        ), 0) AS total_facturado
       FROM clientes c
       LEFT JOIN facturas f ON f.cliente_id = c.id AND f.tipo = 'venta'
       GROUP BY c.id
@@ -30,7 +36,7 @@ router.get('/clientes', verificarToken, async (req, res) => {
     const resultado = facturas.rows.map(cliente => {
       const total_facturado = parseFloat(cliente.total_facturado);
       const total_cobrado = cobrosMap[cliente.cliente_id] || 0;
-      const saldo = total_facturado - total_cobrado;
+      const saldo = parseFloat((total_facturado - total_cobrado).toFixed(2));
 
       return {
         id: cliente.cliente_id,
@@ -47,12 +53,19 @@ router.get('/clientes', verificarToken, async (req, res) => {
     res.status(500).json({ error: 'Error al calcular balance de clientes' });
   }
 });
+
 // Balance de proveedores
 router.get('/proveedores', verificarToken, async (req, res) => {
   try {
     const facturas = await pool.query(`
-      SELECT p.id AS proveedor_id, p.nombre, 
-             COALESCE(SUM(f.total), 0) AS total_facturado
+      SELECT p.id AS proveedor_id, p.nombre,
+        COALESCE(SUM(
+          CASE 
+            WHEN f.tipo_f IN ('factura', 'nota de débito') THEN f.total
+            WHEN f.tipo_f = 'nota de crédito' THEN -f.total
+            ELSE 0
+          END
+        ), 0) AS total_facturado
       FROM proveedores p
       LEFT JOIN facturas f ON f.proveedor_id = p.id AND f.tipo = 'compra'
       GROUP BY p.id
@@ -73,7 +86,7 @@ router.get('/proveedores', verificarToken, async (req, res) => {
     const resultado = facturas.rows.map(proveedor => {
       const total_facturado = parseFloat(proveedor.total_facturado);
       const total_pagado = pagosMap[proveedor.proveedor_id] || 0;
-      const saldo = total_facturado - total_pagado;
+      const saldo = parseFloat((total_facturado - total_pagado).toFixed(2));
 
       return {
         id: proveedor.proveedor_id,
