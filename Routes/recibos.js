@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const pool = require('../db');
+const supabase = require('../supabaseClient');
 const verificarToken = require('../middlewares/authMiddleware');
 
 // Crear recibo con cheques
@@ -17,14 +17,13 @@ router.post('/', verificarToken, async (req, res) => {
     otros,
     observaciones,
   } = req.body;
-const cheques = req.body.cheques || req.body.cheque || [];
+  const cheques = req.body.cheques || req.body.cheque || [];
 
   if (!fecha || !tipo || (tipo !== 'cobro' && tipo !== 'pago')) {
     return res.status(400).json({ error: 'Tipo o fecha inválidos.' });
   }
 
   if (tipo === 'cobro' && !cliente_id) {
-    console.log(cliente_id);
     return res.status(400).json({ error: 'cliente_id requerido para "cobro".' });
   }
 
@@ -32,56 +31,58 @@ const cheques = req.body.cheques || req.body.cheque || [];
     return res.status(400).json({ error: 'proveedor_id requerido para "pago".' });
   }
 
-  const totalCheques = cheques?.reduce((acc, c) => acc + c.monto, 0) || 0;
+  const totalCheques = cheques.reduce((acc, c) => acc + c.monto, 0) || 0;
   const total = (efectivo || 0) + (transferencia || 0) + (otros || 0) + totalCheques;
 
-  const client = await pool.connect();
-
   try {
-    await client.query('BEGIN');
-
-    const reciboResult = await client.query(
-      `INSERT INTO recibos (numero, fecha, tipo, cliente_id, proveedor_id, factura_id, efectivo, transferencia, otros, observaciones, total)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
-      [
+    // Insertar recibo
+    const { data: reciboData, error: errorRecibo } = await supabase
+      .from('recibos')
+      .insert([{
         numero,
         fecha,
         tipo,
-        cliente_id || null,
-        proveedor_id || null,
-        factura_id || null,
-        efectivo || 0,
-        transferencia || 0,
-        otros || 0,
-        observaciones || '',
+        cliente_id: cliente_id || null,
+        proveedor_id: proveedor_id || null,
+        factura_id: factura_id || null,
+        efectivo: efectivo || 0,
+        transferencia: transferencia || 0,
+        otros: otros || 0,
+        observaciones: observaciones || '',
         total
-      ]
-    );
+      }])
+      .select()
+      .single();
 
-    const reciboId = reciboResult.rows[0].id;
+    if (errorRecibo) throw errorRecibo;
 
-    if (cheques && cheques.length > 0) {
-      for (const chequeItem of cheques) {
-        const tipoCheque = chequeItem.tipo.charAt(0).toUpperCase() + chequeItem.tipo.slice(1).toLowerCase();
-        await client.query(
-          `INSERT INTO recibo_cheques (recibo_id, tipo, fecha_cobro, banco, numero, monto)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
-          [reciboId, tipoCheque, chequeItem.fechaCobro, chequeItem.banco, chequeItem.numero, chequeItem.monto]
-        );
-      }
+    const reciboId = reciboData.id;
+
+    // Insertar cheques si hay
+    if (cheques.length > 0) {
+      // Formatear los cheques para insertar
+      const chequesToInsert = cheques.map(c => ({
+        recibo_id: reciboId,
+        tipo: c.tipo.charAt(0).toUpperCase() + c.tipo.slice(1).toLowerCase(),
+        fecha_cobro: c.fechaCobro,
+        banco: c.banco,
+        numero: c.numero,
+        monto: c.monto
+      }));
+
+      const { error: errorCheques } = await supabase
+        .from('recibo_cheques')
+        .insert(chequesToInsert);
+
+      if (errorCheques) throw errorCheques;
     }
 
-    await client.query('COMMIT');
     res.json({ mensaje: 'Recibo creado correctamente', reciboId });
   } catch (err) {
-    await client.query('ROLLBACK');
     console.error(err);
     res.status(500).json({ error: 'Error al crear el recibo.' });
-  } finally {
-    client.release();
   }
 });
-
 
 // Obtener recibos por tipo
 router.get('/', verificarToken, async (req, res) => {
@@ -92,20 +93,30 @@ router.get('/', verificarToken, async (req, res) => {
   }
 
   try {
-    const result = await pool.query(
-      `
-      SELECT r.*, 
-             c.nombre AS cliente_nombre, 
-             p.nombre AS proveedor_nombre
-      FROM recibos r
-      LEFT JOIN clientes c ON r.cliente_id = c.id
-      LEFT JOIN proveedores p ON r.proveedor_id = p.id
-      WHERE r.tipo = $1
-      ORDER BY r.fecha DESC
-      `,
-      [tipo]
-    );
-    res.json(result.rows);
+    // Usar RPC para la consulta con joins o hacer manualmente en JS
+    // Aquí hacemos la consulta con join usando select anidado
+    const { data, error } = await supabase
+      .from('recibos')
+      .select(`
+        *,
+        clientes:cliente_id(nombre),
+        proveedores:proveedor_id(nombre)
+      `)
+      .eq('tipo', tipo)
+      .order('fecha', { ascending: false });
+
+    if (error) throw error;
+
+    // Mapear para unificar nombres y que no venga como objeto anidado
+    const recibos = data.map(r => ({
+      ...r,
+      cliente_nombre: r.clientes?.nombre || null,
+      proveedor_nombre: r.proveedores?.nombre || null,
+      clientes: undefined,
+      proveedores: undefined,
+    }));
+
+    res.json(recibos);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Error al obtener recibos.' });
@@ -117,31 +128,39 @@ router.get('/:id', verificarToken, async (req, res) => {
   const reciboId = req.params.id;
 
   try {
-    const reciboResult = await pool.query(
-      `
-      SELECT r.*, 
-             c.nombre AS cliente_nombre, 
-             p.nombre AS proveedor_nombre
-      FROM recibos r
-      LEFT JOIN clientes c ON r.cliente_id = c.id
-      LEFT JOIN proveedores p ON r.proveedor_id = p.id
-      WHERE r.id = $1
-      `,
-      [reciboId]
-    );
+    const { data: reciboData, error: errorRecibo } = await supabase
+      .from('recibos')
+      .select(`
+        *,
+        clientes:cliente_id(nombre),
+        proveedores:proveedor_id(nombre)
+      `)
+      .eq('id', reciboId)
+      .single();
 
-    if (reciboResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Recibo no encontrado.' });
+    if (errorRecibo) {
+      if (errorRecibo.code === 'PGRST116') return res.status(404).json({ error: 'Recibo no encontrado.' });
+      throw errorRecibo;
     }
 
-    const recibo = reciboResult.rows[0];
+    const recibo = {
+      ...reciboData,
+      cliente_nombre: reciboData.clientes?.nombre || null,
+      proveedor_nombre: reciboData.proveedores?.nombre || null,
+    };
 
-    const chequesResult = await pool.query(
-      'SELECT * FROM recibo_cheques WHERE recibo_id = $1',
-      [reciboId]
-    );
+    delete recibo.clientes;
+    delete recibo.proveedores;
 
-    recibo.cheques = chequesResult.rows;
+    // Obtener cheques asociados
+    const { data: cheques, error: errorCheques } = await supabase
+      .from('recibo_cheques')
+      .select('*')
+      .eq('recibo_id', reciboId);
+
+    if (errorCheques) throw errorCheques;
+
+    recibo.cheques = cheques;
 
     res.json(recibo);
   } catch (err) {
@@ -182,61 +201,59 @@ router.put('/:id', verificarToken, async (req, res) => {
   const totalCheques = cheques?.reduce((acc, c) => acc + c.monto, 0) || 0;
   const total = (efectivo || 0) + (transferencia || 0) + (otros || 0) + totalCheques;
 
-  const client = await pool.connect();
-
   try {
-    await client.query('BEGIN');
-
-    await client.query(
-      `UPDATE recibos SET 
-         numero = $1,
-         fecha = $2,
-         tipo = $3,
-         cliente_id = $4,
-         proveedor_id = $5,
-         factura_id = $6,
-         efectivo = $7,
-         transferencia = $8,
-         otros = $9,
-         observaciones = $10,
-         total = $11
-       WHERE id = $12`,
-      [
+    // Actualizar recibo
+    const { data: reciboUpdated, error: errorUpdate } = await supabase
+      .from('recibos')
+      .update({
         numero,
         fecha,
         tipo,
-        cliente_id || null,
-        proveedor_id || null,
-        factura_id || null,
-        efectivo || 0,
-        transferencia || 0,
-        otros || 0,
-        observaciones || '',
-        total,
-        reciboId
-      ]
-    );
+        cliente_id: cliente_id || null,
+        proveedor_id: proveedor_id || null,
+        factura_id: factura_id || null,
+        efectivo: efectivo || 0,
+        transferencia: transferencia || 0,
+        otros: otros || 0,
+        observaciones: observaciones || '',
+        total
+      })
+      .eq('id', reciboId)
+      .select()
+      .single();
 
-    await client.query('DELETE FROM recibo_cheques WHERE recibo_id = $1', [reciboId]);
+    if (errorUpdate) throw errorUpdate;
 
+    // Borrar cheques viejos
+    const { error: errorDeleteCheques } = await supabase
+      .from('recibo_cheques')
+      .delete()
+      .eq('recibo_id', reciboId);
+
+    if (errorDeleteCheques) throw errorDeleteCheques;
+
+    // Insertar cheques nuevos
     if (cheques && cheques.length > 0) {
-      for (const cheque of cheques) {
-        await client.query(
-          `INSERT INTO recibo_cheques (recibo_id, tipo, fecha_cobro, banco, numero, monto)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
-          [reciboId, cheque.tipo, cheque.fechaCobro, cheque.banco, cheque.numero, cheque.monto]
-        );
-      }
+      const chequesToInsert = cheques.map(c => ({
+        recibo_id: reciboId,
+        tipo: c.tipo.charAt(0).toUpperCase() + c.tipo.slice(1).toLowerCase(),
+        fecha_cobro: c.fechaCobro,
+        banco: c.banco,
+        numero: c.numero,
+        monto: c.monto
+      }));
+
+      const { error: errorInsertCheques } = await supabase
+        .from('recibo_cheques')
+        .insert(chequesToInsert);
+
+      if (errorInsertCheques) throw errorInsertCheques;
     }
 
-    await client.query('COMMIT');
     res.json({ mensaje: 'Recibo actualizado correctamente.' });
   } catch (err) {
-    await client.query('ROLLBACK');
     console.error(err);
     res.status(500).json({ error: 'Error al actualizar el recibo.' });
-  } finally {
-    client.release();
   }
 });
 
@@ -245,10 +262,18 @@ router.delete('/:id', verificarToken, async (req, res) => {
   const reciboId = req.params.id;
 
   try {
-    const result = await pool.query('DELETE FROM recibos WHERE id = $1 RETURNING *', [reciboId]);
-    if (result.rows.length === 0) {
+    const { data, error } = await supabase
+      .from('recibos')
+      .delete()
+      .eq('id', reciboId)
+      .select();
+
+    if (error) throw error;
+
+    if (!data.length) {
       return res.status(404).json({ error: 'Recibo no encontrado.' });
     }
+
     res.json({ mensaje: 'Recibo eliminado correctamente.' });
   } catch (err) {
     console.error(err);

@@ -1,14 +1,18 @@
-// routes/proveedores.js
 const express = require('express');
 const router = express.Router();
-const pool = require('../db');
+const supabase = require('../supabaseClient');
 const verificarToken = require('../middlewares/authMiddleware');
 
 // Obtener todos los proveedores
 router.get('/', verificarToken, async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM proveedores ORDER BY id');
-    res.json(result.rows);
+    const { data, error } = await supabase
+      .from('proveedores')
+      .select('*')
+      .order('id', { ascending: true });
+
+    if (error) throw error;
+    res.json(data);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Error al obtener proveedores' });
@@ -17,17 +21,26 @@ router.get('/', verificarToken, async (req, res) => {
 
 // Obtener proveedor por ID
 router.get('/:id', verificarToken, async (req, res) => {
+  const id = req.params.id;
   try {
-    const result = await pool.query('SELECT * FROM proveedores WHERE id = $1', [req.params.id]);
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Proveedor no encontrado' });
-    res.json(result.rows[0]);
+    const { data, error } = await supabase
+      .from('proveedores')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') return res.status(404).json({ error: 'Proveedor no encontrado' });
+      throw error;
+    }
+
+    res.json(data);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Error al obtener proveedor' });
   }
 });
 
-// Crear nuevo proveedor
 // Crear nuevo proveedor (con validación de CUIT único)
 router.post('/', verificarToken, async (req, res) => {
   const { nombre, domicilio, cuit, email, telefono } = req.body;
@@ -35,16 +48,23 @@ router.post('/', verificarToken, async (req, res) => {
 
   try {
     if (cuit) {
-      const cuitExistente = await pool.query('SELECT * FROM proveedores WHERE cuit = $1', [cuit]);
-      if (cuitExistente.rows.length > 0) {
+      const { data: cuitExistente, error: errorCuit } = await supabase
+        .from('proveedores')
+        .select('*')
+        .eq('cuit', cuit);
+
+      if (errorCuit) throw errorCuit;
+
+      if (cuitExistente.length > 0) {
         return res.status(400).json({ error: 'El CUIT ya está registrado.' });
       }
     }
 
-    await pool.query(
-      'INSERT INTO proveedores (nombre, domicilio, cuit, email, telefono) VALUES ($1, $2, $3, $4, $5)',
-      [nombre, domicilio, cuit, email, telefono]
-    );
+    const { data, error } = await supabase
+      .from('proveedores')
+      .insert([{ nombre, domicilio, cuit, email, telefono }]);
+
+    if (error) throw error;
 
     res.json({ mensaje: 'Proveedor creado correctamente.' });
   } catch (err) {
@@ -53,45 +73,59 @@ router.post('/', verificarToken, async (req, res) => {
   }
 });
 
-
 // Actualizar proveedor (con validación de CUIT único)
 router.put('/:id', verificarToken, async (req, res) => {
-  const { nombre, domicilio, cuit, email, telefono } = req.body;
   const id = req.params.id;
+  const { nombre, domicilio, cuit, email, telefono } = req.body;
 
   try {
     if (cuit) {
-      const cuitExistente = await pool.query(
-        'SELECT * FROM proveedores WHERE cuit = $1 AND id != $2',
-        [cuit, id]
-      );
-      if (cuitExistente.rows.length > 0) {
+      const { data: cuitExistente, error: errorCuit } = await supabase
+        .from('proveedores')
+        .select('*')
+        .eq('cuit', cuit)
+        .neq('id', id);
+
+      if (errorCuit) throw errorCuit;
+
+      if (cuitExistente.length > 0) {
         return res.status(400).json({ error: 'El CUIT ya pertenece a otro proveedor.' });
       }
     }
 
-    const result = await pool.query(
-      `UPDATE proveedores 
-       SET nombre=$1, domicilio=$2, cuit=$3, email=$4, telefono=$5 
-       WHERE id=$6 RETURNING *`,
-      [nombre, domicilio, cuit, email, telefono, id]
-    );
+    const { data, error } = await supabase
+      .from('proveedores')
+      .update({ nombre, domicilio, cuit, email, telefono })
+      .eq('id', id)
+      .select()
+      .single();
 
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Proveedor no encontrado.' });
+    if (error) {
+      if (error.code === 'PGRST116') return res.status(404).json({ error: 'Proveedor no encontrado.' });
+      throw error;
+    }
 
-    res.json({ mensaje: 'Proveedor actualizado.', proveedor: result.rows[0] });
+    res.json({ mensaje: 'Proveedor actualizado.', proveedor: data });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Error al actualizar proveedor.' });
   }
 });
 
-
 // Eliminar proveedor
 router.delete('/:id', verificarToken, async (req, res) => {
+  const id = req.params.id;
   try {
-    const result = await pool.query('DELETE FROM proveedores WHERE id = $1 RETURNING *', [req.params.id]);
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Proveedor no encontrado' });
+    const { data, error } = await supabase
+      .from('proveedores')
+      .delete()
+      .eq('id', id)
+      .select();
+
+    if (error) throw error;
+
+    if (!data.length) return res.status(404).json({ error: 'Proveedor no encontrado' });
+
     res.json({ mensaje: 'Proveedor eliminado correctamente' });
   } catch (err) {
     console.error(err);
