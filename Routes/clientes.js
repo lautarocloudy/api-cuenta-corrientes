@@ -45,9 +45,8 @@ router.post('/', verificarToken, async (req, res) => {
     if (cuit) {
       const { data: cuitExistente, error: err } = await supabase
         .from('clientes')
-        .select('id')
+        .select('*')
         .eq('cuit', cuit)
-        .limit(1);
 
       if (err) throw err;
       if (cuitExistente.length > 0) {
