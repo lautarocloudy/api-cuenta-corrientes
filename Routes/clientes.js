@@ -37,7 +37,7 @@ router.get('/:id', verificarToken, async (req, res) => {
 });
 
 // Crear nuevo cliente (con validación de CUIT único)
-router.post('/', verificarToken, async (req, res) => {
+router.post('/', async (req, res) => {
   const { nombre, domicilio, cuit, email, telefono } = req.body;
   if (!nombre) return res.status(400).json({ error: 'El nombre es obligatorio.' });
 
@@ -45,8 +45,9 @@ router.post('/', verificarToken, async (req, res) => {
     if (cuit) {
       const { data: cuitExistente, error: err } = await supabase
         .from('clientes')
-        .select('*')
+        .select('id')
         .eq('cuit', cuit)
+        .limit(1);
 
       if (err) throw err;
       if (cuitExistente.length > 0) {
