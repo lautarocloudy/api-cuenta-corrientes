@@ -43,13 +43,13 @@ router.post('/', async (req, res) => {
 
   try {
     if (cuit) {
-      const { data: cuitExistente, error: err } = await supabase
+      const { data: cuitExistente, error: errorCuit } = await supabase
         .from('clientes')
-        .select('id')
-        .eq('cuit', cuit)
-        .limit(1);
+        .select('*')
+        .eq('cuit', cuit) 
 
-      if (err) throw err;
+      if (errorCuit) throw errorCuit;
+
       if (cuitExistente.length > 0) {
         return res.status(400).json({ error: 'El CUIT ya está registrado.' });
       }
@@ -61,7 +61,7 @@ router.post('/', async (req, res) => {
 
     if (error) throw error;
 
-    res.json({ mensaje: 'Cliente creado correctamente.', cliente: data[0] });
+    res.json({ mensaje: 'Cliente creado correctamente.' });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Error al crear cliente.' });
