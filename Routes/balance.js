@@ -197,6 +197,66 @@ router.get('/clientes/buscar/:nombre', verificarToken, async (req, res) => {
     res.status(500).json({ error: 'Error al buscar balance del cliente' });
   }
 });
+router.get('/proveedores/buscar/:nombre', verificarToken, async (req, res) => {
+  const nombre = req.params.nombre;
+
+  try {
+    const { data: proveedores, error: proveedorError } = await supabase
+      .from('proveedores')
+      .select('id, nombre')
+      .ilike('nombre', `%${nombre}%`);
+    if (proveedorError) throw proveedorError;
+
+    if (!proveedores.length) {
+      return res.status(404).json({ error: 'Proveedor no encontrado' });
+    }
+
+    const resultados = [];
+
+    for (const proveedor of proveedores) {
+      const proveedorId = proveedor.id;
+
+      const { data: facturas } = await supabase
+        .from('facturas')
+        .select('tipo_f, total')
+        .eq('proveedor_id', proveedorId)
+        .eq('tipo', 'compra');
+
+      const { data: pagos } = await supabase
+        .from('recibos')
+        .select('total')
+        .eq('proveedor_id', proveedorId)
+        .eq('tipo', 'pago');
+
+      let total_facturado = 0;
+      facturas.forEach(f => {
+        if (f.tipo_f === 'factura' || f.tipo_f === 'nota de débito') {
+          total_facturado += parseFloat(f.total);
+        } else if (f.tipo_f === 'nota de crédito') {
+          total_facturado -= parseFloat(f.total);
+        }
+      });
+
+      let total_pagado = 0;
+      pagos.forEach(p => total_pagado += parseFloat(p.total));
+
+      const saldo = parseFloat((total_facturado - total_pagado).toFixed(2));
+
+      resultados.push({
+        id: proveedor.id,
+        nombre: proveedor.nombre,
+        total_facturado,
+        total_pagado,
+        saldo
+      });
+    }
+
+    res.json(resultados);
+  } catch (err) {
+    console.error('Error buscando balance proveedor:', err.message);
+    res.status(500).json({ error: 'Error al buscar balance del proveedor' });
+  }
+});
 
 
 module.exports = router;
