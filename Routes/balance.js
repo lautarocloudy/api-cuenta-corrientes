@@ -134,4 +134,69 @@ router.get('/proveedores', verificarToken, async (req, res) => {
   }
 });
 
+router.get('/clientes/buscar/:nombre', verificarToken, async (req, res) => {
+  const nombre = req.params.nombre;
+
+  try {
+    // Buscar cliente por nombre (parcial o exacto)
+    const { data: clientes, error: clienteError } = await supabase
+      .from('clientes')
+      .select('id, nombre')
+      .ilike('nombre', `%${nombre}%`);
+    if (clienteError) throw clienteError;
+
+    if (!clientes.length) {
+      return res.status(404).json({ error: 'Cliente no encontrado' });
+    }
+
+    // Si hay más de uno, podés devolver todos o elegir el primero
+    // Para ahora, vamos a procesar todos los que coincidan
+    const resultados = [];
+
+    for (const cliente of clientes) {
+      const clienteId = cliente.id;
+
+      const { data: facturas } = await supabase
+        .from('facturas')
+        .select('tipo_f, total')
+        .eq('cliente_id', clienteId)
+        .eq('tipo', 'venta');
+
+      const { data: cobros } = await supabase
+        .from('recibos')
+        .select('total')
+        .eq('cliente_id', clienteId)
+        .eq('tipo', 'cobro');
+
+      let total_facturado = 0;
+      facturas.forEach(f => {
+        if (f.tipo_f === 'factura' || f.tipo_f === 'nota de débito') {
+          total_facturado += parseFloat(f.total);
+        } else if (f.tipo_f === 'nota de crédito') {
+          total_facturado -= parseFloat(f.total);
+        }
+      });
+
+      let total_cobrado = 0;
+      cobros.forEach(c => total_cobrado += parseFloat(c.total));
+
+      const saldo = parseFloat((total_facturado - total_cobrado).toFixed(2));
+
+      resultados.push({
+        id: cliente.id,
+        nombre: cliente.nombre,
+        total_facturado,
+        total_cobrado,
+        saldo
+      });
+    }
+
+    res.json(resultados);
+  } catch (err) {
+    console.error('Error buscando balance cliente:', err.message);
+    res.status(500).json({ error: 'Error al buscar balance del cliente' });
+  }
+});
+
+
 module.exports = router;
