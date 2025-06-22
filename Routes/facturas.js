@@ -270,10 +270,11 @@ router.delete('/:id', verificarToken, async (req, res) => {
   }
 });
 
-// Buscar facturas por nombre de cliente/proveedor y fecha
+// Buscar facturas por nombre de cliente/proveedor y rango de fechas
 router.get('/buscar', verificarToken, async (req, res) => {
   const { tipo, nombre, desde, hasta } = req.query;
 
+  // Validaciones básicas
   if (!tipo || (tipo !== 'venta' && tipo !== 'compra')) {
     return res.status(400).json({ error: 'Tipo inválido. Debe ser "venta" o "compra".' });
   }
@@ -290,36 +291,40 @@ router.get('/buscar', verificarToken, async (req, res) => {
     let idBuscado = null;
 
     if (tipo === 'venta') {
-      // Buscar cliente por nombre
+      // Buscar cliente por nombre (primer match)
       const { data: clienteData, error: clienteError } = await supabase
         .from('clientes')
         .select('id')
         .ilike('nombre', `%${nombre}%`)
-        .single();
+        .limit(1)
+        .maybeSingle();
 
-      if (clienteError || !clienteData) {
+      if (clienteError) throw clienteError;
+
+      if (!clienteData) {
         return res.status(404).json({ error: 'Cliente no encontrado.' });
       }
 
       idBuscado = clienteData.id;
     } else {
-      // Buscar proveedor por nombre
+      // Buscar proveedor por nombre (primer match)
       const { data: proveedorData, error: proveedorError } = await supabase
         .from('proveedores')
         .select('id')
         .ilike('nombre', `%${nombre}%`)
         .limit(1)
-        .maybeSingle()
-        
+        .maybeSingle();
 
-      if (proveedorError || !proveedorData) {
+      if (proveedorError) throw proveedorError;
+
+      if (!proveedorData) {
         return res.status(404).json({ error: 'Proveedor no encontrado.' });
       }
 
       idBuscado = proveedorData.id;
     }
 
-    // Buscar facturas filtradas por id y fecha
+    // Buscar todas las facturas del cliente/proveedor en el rango de fechas (pueden ser múltiples)
     const { data, error } = await supabase
       .from('facturas')
       .select(`
@@ -335,6 +340,7 @@ router.get('/buscar', verificarToken, async (req, res) => {
 
     if (error) throw error;
 
+    // Mapear para subir nombres a nivel superior
     const facturas = data.map(f => ({
       ...f,
       cliente_nombre: f.cliente?.nombre || null,
@@ -345,10 +351,9 @@ router.get('/buscar', verificarToken, async (req, res) => {
 
     res.json(facturas);
   } catch (err) {
-    console.error(err);
+    console.error('Error en /facturas/buscar:', err);
     res.status(500).json({ error: 'Error al buscar facturas.' });
   }
 });
-
 
 module.exports = router;
