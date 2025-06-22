@@ -134,129 +134,88 @@ router.get('/proveedores', verificarToken, async (req, res) => {
   }
 });
 
-router.get('/clientes/buscar/:nombre', verificarToken, async (req, res) => {
-  const nombre = req.params.nombre;
+router.get('/buscar', verificarToken, async (req, res) => {
+  const { tipo, nombre, desde, hasta } = req.query;
+
+  // Validaciones básicas
+  if (!tipo || (tipo !== 'venta' && tipo !== 'compra')) {
+    return res.status(400).json({ error: 'Tipo inválido. Debe ser "venta" o "compra".' });
+  }
+
+  if (!nombre || nombre.trim() === '') {
+    return res.status(400).json({ error: 'Debés enviar el nombre del cliente o proveedor.' });
+  }
+
+  if (!desde || !hasta) {
+    return res.status(400).json({ error: 'Debés enviar el rango de fechas: desde y hasta.' });
+  }
 
   try {
-    // Buscar cliente por nombre (parcial o exacto)
-    const { data: clientes, error: clienteError } = await supabase
-      .from('clientes')
-      .select('id, nombre')
-      .ilike('nombre', `%${nombre}%`);
-    if (clienteError) throw clienteError;
+    let idBuscado = null;
 
-    if (!clientes.length) {
-      return res.status(404).json({ error: 'Cliente no encontrado' });
+    if (tipo === 'venta') {
+      // Buscar cliente por nombre (primer resultado)
+      const { data: clienteData, error: clienteError } = await supabase
+        .from('clientes')
+        .select('id')
+        .ilike('nombre', `%${nombre}%`)
+        .limit(1)
+        .maybeSingle();
+
+      if (clienteError) throw clienteError;
+      if (!clienteData) return res.status(404).json({ error: 'Cliente no encontrado.' });
+
+      idBuscado = clienteData.id;
+    } else {
+      // Buscar proveedor por nombre (primer resultado)
+      const { data: proveedorData, error: proveedorError } = await supabase
+        .from('proveedores')
+        .select('id')
+        .ilike('nombre', `%${nombre}%`)
+        .limit(1)
+        .maybeSingle();
+
+      if (proveedorError) throw proveedorError;
+      if (!proveedorData) return res.status(404).json({ error: 'Proveedor no encontrado.' });
+
+      idBuscado = proveedorData.id;
     }
 
-    // Si hay más de uno, podés devolver todos o elegir el primero
-    // Para ahora, vamos a procesar todos los que coincidan
-    const resultados = [];
-
-    for (const cliente of clientes) {
-      const clienteId = cliente.id;
-
-      const { data: facturas } = await supabase
-        .from('facturas')
-        .select('tipo_f, total')
-        .eq('cliente_id', clienteId)
-        .eq('tipo', 'venta');
-
-      const { data: cobros } = await supabase
-        .from('recibos')
-        .select('total')
-        .eq('cliente_id', clienteId)
-        .eq('tipo', 'cobro');
-
-      let total_facturado = 0;
-      facturas.forEach(f => {
-        if (f.tipo_f === 'factura' || f.tipo_f === 'nota de débito') {
-          total_facturado += parseFloat(f.total);
-        } else if (f.tipo_f === 'nota de crédito') {
-          total_facturado -= parseFloat(f.total);
-        }
-      });
-
-      let total_cobrado = 0;
-      cobros.forEach(c => total_cobrado += parseFloat(c.total));
-
-      const saldo = parseFloat((total_facturado - total_cobrado).toFixed(2));
-
-      resultados.push({
-        id: cliente.id,
-        nombre: cliente.nombre,
-        total_facturado,
-        total_cobrado,
-        saldo
-      });
+    // Validar idBuscado numérico
+    if (!idBuscado || isNaN(Number(idBuscado))) {
+      return res.status(400).json({ error: 'ID de cliente o proveedor inválido.' });
     }
 
-    res.json(resultados);
+    // Buscar facturas filtradas por id y fecha
+    const { data, error } = await supabase
+      .from('facturas')
+      .select(`
+        *,
+        cliente:clientes(nombre),
+        proveedor:proveedores(nombre)
+      `)
+      .eq('tipo', tipo)
+      .eq(tipo === 'venta' ? 'cliente_id' : 'proveedor_id', idBuscado)
+      .gte('fecha', desde)
+      .lte('fecha', hasta)
+      .order('fecha', { ascending: false });
+
+    if (error) throw error;
+
+    // Mapear nombres a nivel superior para frontend
+    const facturas = data.map(f => ({
+      ...f,
+      cliente_nombre: f.cliente?.nombre || null,
+      proveedor_nombre: f.proveedor?.nombre || null,
+      cliente: undefined,
+      proveedor: undefined,
+    }));
+
+    res.json(facturas);
   } catch (err) {
-    console.error('Error buscando balance cliente:', err.message);
-    res.status(500).json({ error: 'Error al buscar balance del cliente' });
+    console.error('Error en /facturas/buscar:', err);
+    res.status(500).json({ error: err.message || 'Error al buscar facturas.' });
   }
 });
-router.get('/proveedores/buscar/:nombre', verificarToken, async (req, res) => {
-  const nombre = req.params.nombre;
-
-  try {
-    const { data: proveedores, error: proveedorError } = await supabase
-      .from('proveedores')
-      .select('id, nombre')
-      .ilike('nombre', `%${nombre}%`);
-    if (proveedorError) throw proveedorError;
-
-    if (!proveedores.length) {
-      return res.status(404).json({ error: 'Proveedor no encontrado' });
-    }
-
-    const resultados = [];
-
-    for (const proveedor of proveedores) {
-      const proveedorId = proveedor.id;
-
-      const { data: facturas } = await supabase
-        .from('facturas')
-        .select('tipo_f, total')
-        .eq('proveedor_id', proveedorId)
-        .eq('tipo', 'compra');
-
-      const { data: pagos } = await supabase
-        .from('recibos')
-        .select('total')
-        .eq('proveedor_id', proveedorId)
-        .eq('tipo', 'pago');
-
-      let total_facturado = 0;
-      facturas.forEach(f => {
-        if (f.tipo_f === 'factura' || f.tipo_f === 'nota de débito') {
-          total_facturado += parseFloat(f.total);
-        } else if (f.tipo_f === 'nota de crédito') {
-          total_facturado -= parseFloat(f.total);
-        }
-      });
-
-      let total_pagado = 0;
-      pagos.forEach(p => total_pagado += parseFloat(p.total));
-
-      const saldo = parseFloat((total_facturado - total_pagado).toFixed(2));
-
-      resultados.push({
-        id: proveedor.id,
-        nombre: proveedor.nombre,
-        total_facturado,
-        total_pagado,
-        saldo
-      });
-    }
-
-    res.json(resultados);
-  } catch (err) {
-    console.error('Error buscando balance proveedor:', err.message);
-    res.status(500).json({ error: 'Error al buscar balance del proveedor' });
-  }
-});
-
 
 module.exports = router;
