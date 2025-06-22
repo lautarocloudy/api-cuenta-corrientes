@@ -308,7 +308,9 @@ router.get('/buscar', verificarToken, async (req, res) => {
         .from('proveedores')
         .select('id')
         .ilike('nombre', `%${nombre}%`)
-        .single();
+        .limit(1)
+        .maybeSingle()
+        
 
       if (proveedorError || !proveedorData) {
         return res.status(404).json({ error: 'Proveedor no encontrado.' });
