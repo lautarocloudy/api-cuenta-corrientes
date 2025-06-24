@@ -79,6 +79,73 @@ router.post('/', verificarToken, async (req, res) => {
   }
 });
 
+router.get('/buscar', verificarToken, async (req, res) => {
+  console.log('QUERY DETECTADA1', req.query)
+  const { tipo, nombre, desde, hasta } = req.query;
+console.log('Query:', { tipo, nombre, desde, hasta });
+  if (!tipo || (tipo !== 'venta' && tipo !== 'compra')) {
+    return res.status(400).json({ error: 'El tipo debe ser "venta" o "compra".' });
+  }
+
+  try {
+    const idField = tipo === 'venta' ? 'cliente_id' : 'proveedor_id';
+    const tableName = tipo === 'venta' ? 'clientes' : 'proveedores';
+
+    let idsFiltrados = null;
+
+    if (nombre) {
+      const { data: entidades, error: errorEntidades } = await supabase
+        .from(tableName)
+        .select('id')
+        .ilike('nombre', `%${nombre}%`);
+
+      if (errorEntidades) throw errorEntidades;
+
+      idsFiltrados = entidades.map((e) => e.id);
+
+      // Si no hay coincidencias → devolver array vacío sin ejecutar el query
+      if (idsFiltrados.length === 0) {
+        console.log('No hay coincidencias por nombre:', nombre);
+        return res.json([]);
+      }
+    }
+
+    let query = supabase
+      .from('facturas')
+      .select(`
+        *,
+        cliente:clientes(nombre),
+        proveedor:proveedores(nombre)
+      `)
+      .eq('tipo', tipo);
+
+    if (desde) query = query.gte('fecha', desde);
+    if (hasta) query = query.lte('fecha', hasta);
+
+    // Aplicar filtro solo si hay resultados
+    if (idsFiltrados && idsFiltrados.length > 0) {
+      query = query.in(idField, idsFiltrados);
+    }
+
+    const { data, error } = await query;
+
+    if (error) throw error;
+
+    const facturas = data.map(f => ({
+      ...f,
+      cliente_nombre: f.cliente?.nombre || null,
+      proveedor_nombre: f.proveedor?.nombre || null,
+      cliente: undefined,
+      proveedor: undefined,
+    }));
+
+    res.json(facturas);
+  } catch (err) {
+    console.error('ERROR en /buscar:', err);
+    res.status(500).json({ error: 'Error al buscar facturas.' });
+  }
+});
+
 
 // Obtener facturas por tipo
 router.get('/', verificarToken, async (req, res) => {
@@ -120,7 +187,7 @@ router.get('/', verificarToken, async (req, res) => {
 // Obtener factura por ID con ítems
 router.get('/:id', verificarToken, async (req, res) => {
   const facturaId = req.params.id;
-
+console.log('QUERY DETECTADA', req.query)
   try {
     const { data: facturaData, error: facturaError } = await supabase
       .from('facturas')
@@ -269,65 +336,10 @@ router.delete('/:id', verificarToken, async (req, res) => {
     res.status(500).json({ error: 'Error al eliminar la factura.' });
   }
 });
-// Buscar facturas por cliente/proveedor y rango de fecha (consulta optimizada)
-router.get('/buscar', verificarToken, async (req, res) => {
-  const { tipo, nombre, desde, hasta } = req.query;
 
-  if (!tipo || (tipo !== 'venta' && tipo !== 'compra')) {
-    return res.status(400).json({ error: 'El tipo debe ser "venta" o "compra".' });
-  }
 
-  try {
-    let idField = tipo === 'venta' ? 'cliente_id' : 'proveedor_id';
-    let tableName = tipo === 'venta' ? 'clientes' : 'proveedores';
 
-    // Si se busca por nombre, primero obtener IDs que coincidan
-    let idsFiltrados = null;
-    if (nombre) {
-      const { data: entidades, error: entidadesError } = await supabase
-        .from(tableName)
-        .select('id')
-        .ilike('nombre', `%${nombre}%`);
 
-      if (entidadesError) throw entidadesError;
 
-      idsFiltrados = entidades.map(e => e.id);
-      if (!idsFiltrados.length) return res.json([]); // No hay coincidencias
-    }
-
-    let query = supabase
-      .from('facturas')
-      .select(`
-        *,
-        cliente:clientes(nombre),
-        proveedor:proveedores(nombre)
-      `)
-      .eq('tipo', tipo);
-
-    // Agregar filtro por fecha
-    if (desde) query = query.gte('fecha', desde);
-    if (hasta) query = query.lte('fecha', hasta);
-
-    // Agregar filtro por cliente_id o proveedor_id si hay nombre
-    if (idsFiltrados) query = query.in(idField, idsFiltrados);
-
-    const { data, error } = await query;
-
-    if (error) throw error;
-
-    const facturas = data.map(f => ({
-      ...f,
-      cliente_nombre: f.cliente?.nombre || null,
-      proveedor_nombre: f.proveedor?.nombre || null,
-      cliente: undefined,
-      proveedor: undefined,
-    }));
-
-    res.json(facturas);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Error al buscar facturas.' });
-  }
-});
 
 module.exports = router;
