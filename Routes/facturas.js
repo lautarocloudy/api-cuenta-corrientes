@@ -269,78 +269,52 @@ router.delete('/:id', verificarToken, async (req, res) => {
     res.status(500).json({ error: 'Error al eliminar la factura.' });
   }
 });
-
-// Buscar facturas por nombre de cliente/proveedor y rango de fechas
+// Buscar facturas por cliente/proveedor y rango de fecha (consulta optimizada)
 router.get('/buscar', verificarToken, async (req, res) => {
   const { tipo, nombre, desde, hasta } = req.query;
 
-  // Validaciones básicas
   if (!tipo || (tipo !== 'venta' && tipo !== 'compra')) {
-    return res.status(400).json({ error: 'Tipo inválido. Debe ser "venta" o "compra".' });
-  }
-
-  if (!nombre) {
-    return res.status(400).json({ error: 'Debés enviar el nombre del cliente o proveedor.' });
-  }
-
-  if (!desde || !hasta) {
-    return res.status(400).json({ error: 'Debés enviar el rango de fechas: desde y hasta.' });
+    return res.status(400).json({ error: 'El tipo debe ser "venta" o "compra".' });
   }
 
   try {
-    let idBuscado = null;
+    let idField = tipo === 'venta' ? 'cliente_id' : 'proveedor_id';
+    let tableName = tipo === 'venta' ? 'clientes' : 'proveedores';
 
-    if (tipo === 'venta') {
-      // Buscar cliente por nombre (primer match)
-      const { data: clienteData, error: clienteError } = await supabase
-        .from('clientes')
+    // Si se busca por nombre, primero obtener IDs que coincidan
+    let idsFiltrados = null;
+    if (nombre) {
+      const { data: entidades, error: entidadesError } = await supabase
+        .from(tableName)
         .select('id')
-        .ilike('nombre', `%${nombre}%`)
-        .limit(1)
-        .maybeSingle();
+        .ilike('nombre', `%${nombre}%`);
 
-      if (clienteError) throw clienteError;
+      if (entidadesError) throw entidadesError;
 
-      if (!clienteData) {
-        return res.status(404).json({ error: 'Cliente no encontrado.' });
-      }
-
-      idBuscado = clienteData.id;
-    } else {
-      // Buscar proveedor por nombre (primer match)
-      const { data: proveedorData, error: proveedorError } = await supabase
-        .from('proveedores')
-        .select('id')
-        .ilike('nombre', `%${nombre}%`)
-        .limit(1)
-        .maybeSingle();
-
-      if (proveedorError) throw proveedorError;
-
-      if (!proveedorData) {
-        return res.status(404).json({ error: 'Proveedor no encontrado.' });
-      }
-
-      idBuscado = proveedorData.id;
+      idsFiltrados = entidades.map(e => e.id);
+      if (!idsFiltrados.length) return res.json([]); // No hay coincidencias
     }
 
-    // Buscar todas las facturas del cliente/proveedor en el rango de fechas (pueden ser múltiples)
-    const { data, error } = await supabase
+    let query = supabase
       .from('facturas')
       .select(`
         *,
         cliente:clientes(nombre),
         proveedor:proveedores(nombre)
       `)
-      .eq('tipo', tipo)
-      .eq(tipo === 'venta' ? 'cliente_id' : 'proveedor_id', idBuscado)
-      .gte('fecha', desde)
-      .lte('fecha', hasta)
-      .order('fecha', { ascending: false });
+      .eq('tipo', tipo);
+
+    // Agregar filtro por fecha
+    if (desde) query = query.gte('fecha', desde);
+    if (hasta) query = query.lte('fecha', hasta);
+
+    // Agregar filtro por cliente_id o proveedor_id si hay nombre
+    if (idsFiltrados) query = query.in(idField, idsFiltrados);
+
+    const { data, error } = await query;
 
     if (error) throw error;
 
-    // Mapear para subir nombres a nivel superior
     const facturas = data.map(f => ({
       ...f,
       cliente_nombre: f.cliente?.nombre || null,
@@ -351,7 +325,7 @@ router.get('/buscar', verificarToken, async (req, res) => {
 
     res.json(facturas);
   } catch (err) {
-    console.error('Error en /facturas/buscar:', err);
+    console.error(err);
     res.status(500).json({ error: 'Error al buscar facturas.' });
   }
 });
