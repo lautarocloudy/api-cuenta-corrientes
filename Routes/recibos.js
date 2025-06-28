@@ -2,7 +2,27 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../supabaseClient');
 const verificarToken = require('../middlewares/authMiddleware');
+router.get('/', verificarToken, async (req, res) => {
+  const { tipo } = req.query;
 
+  if (!tipo || (tipo !== 'cobro' && tipo !== 'pago')) {
+    return res.status(400).json({ error: 'Debés indicar el tipo: "cobro" o "pago".' });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('recibos') // o 'recibos' si usás .select con relaciones
+      .select('*')
+      .eq('tipo', tipo)
+      .order('fecha', { ascending: false });
+
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al obtener recibos.' });
+  }
+});
 // Crear recibo con cheques
 router.get('/buscar', verificarToken, async (req, res) => {
   const { tipo, nombre, desde, hasta } = req.query;
@@ -65,6 +85,7 @@ router.get('/buscar', verificarToken, async (req, res) => {
     res.status(500).json({ error: 'Error al buscar recibos.' });
   }
 });
+
 
 
 
