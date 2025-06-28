@@ -123,6 +123,69 @@ router.get('/', verificarToken, async (req, res) => {
   }
 });
 
+router.get('/buscar', verificarToken, async (req, res) => {
+  const { tipo, nombre, desde, hasta } = req.query;
+  console.log('QUERY RECIBOS:', { tipo, nombre, desde, hasta });
+
+  if (!tipo || (tipo !== 'cobro' && tipo !== 'pago')) {
+    return res.status(400).json({ error: 'El tipo debe ser "cobro" o "pago".' });
+  }
+
+  try {
+    const idField = tipo === 'cobro' ? 'cliente_id' : 'proveedor_id';
+    const tableName = tipo === 'cobro' ? 'clientes' : 'proveedores';
+
+    let idsFiltrados = null;
+
+    if (nombre) {
+      const { data: entidades, error: errorEntidades } = await supabase
+        .from(tableName)
+        .select('id')
+        .ilike('nombre', `%${nombre}%`);
+
+      if (errorEntidades) throw errorEntidades;
+
+      idsFiltrados = entidades.map(e => e.id);
+
+      if (idsFiltrados.length === 0) {
+        console.log('Sin coincidencias por nombre en recibos');
+        return res.json([]);
+      }
+    }
+
+    let query = supabase
+      .from('recibos')
+      .select(`
+        *,
+        clientes:cliente_id(nombre),
+        proveedores:proveedor_id(nombre)
+      `)
+      .eq('tipo', tipo);
+
+    if (desde) query = query.gte('fecha', desde);
+    if (hasta) query = query.lte('fecha', hasta);
+    if (idsFiltrados) query = query.in(idField, idsFiltrados);
+
+    const { data, error } = await query;
+
+    if (error) throw error;
+
+    const recibos = data.map(r => ({
+      ...r,
+      cliente_nombre: r.clientes?.nombre || null,
+      proveedor_nombre: r.proveedores?.nombre || null,
+      clientes: undefined,
+      proveedores: undefined,
+    }));
+
+    res.json(recibos);
+  } catch (err) {
+    console.error('ERROR en /recibos/buscar:', err);
+    res.status(500).json({ error: 'Error al buscar recibos.' });
+  }
+});
+
+
 // Obtener recibo por ID
 router.get('/:id', verificarToken, async (req, res) => {
   const reciboId = req.params.id;

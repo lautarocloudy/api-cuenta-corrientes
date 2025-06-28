@@ -82,7 +82,7 @@ router.post('/', verificarToken, async (req, res) => {
 router.get('/buscar', verificarToken, async (req, res) => {
   console.log('QUERY DETECTADA1', req.query)
   const { tipo, nombre, desde, hasta } = req.query;
-console.log('Query:', { tipo, nombre, desde, hasta });
+
   if (!tipo || (tipo !== 'venta' && tipo !== 'compra')) {
     return res.status(400).json({ error: 'El tipo debe ser "venta" o "compra".' });
   }
