@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../supabaseClient');
 const verificarToken = require('../middlewares/authMiddleware');
-router.get('/', verificarToken, async (req, res) => {
+router.post('/', verificarToken, async (req, res) => {
   const { tipo } = req.query;
 
   if (!tipo || (tipo !== 'cobro' && tipo !== 'pago')) {
