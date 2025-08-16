@@ -11,19 +11,29 @@ router.get('/', verificarToken, async (req, res) => {
 
   try {
     const { data, error } = await supabase
-      .from('recibos') // o 'recibos' si usás .select con relaciones
-      .select('*')
+      .from('recibos')
+      .select(`
+        *,
+        cliente:clientes(id, nombre),
+        proveedor:proveedores(id, nombre)
+      `)
       .eq('tipo', tipo)
       .order('fecha', { ascending: false });
 
     if (error) throw error;
-    res.json(data);
+
+    res.json(
+      data.map(r => ({
+        ...r,
+        nombre: r.cliente ? r.cliente.nombre : (r.proveedor ? r.proveedor.nombre : null)
+      }))
+    );
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Error al obtener recibos.' });
   }
 });
-// Crear recibo con cheques
+
 // Crear recibo con cheques
 router.post('/', verificarToken, async (req, res) => {
   const {
@@ -99,6 +109,53 @@ router.post('/', verificarToken, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Error al crear el recibo.' });
+  }
+});
+
+// Buscar recibos por cliente/proveedor y fecha
+router.get('/buscar', verificarToken, async (req, res) => {
+  const { tipo, nombre, desde, hasta } = req.query;
+
+  if (!tipo || (tipo !== 'cobro' && tipo !== 'pago')) {
+    return res.status(400).json({ error: 'Debés indicar el tipo: "cobro" o "pago".' });
+  }
+
+  try {
+    let query = supabase
+      .from('recibos')
+      .select(`
+        *,
+        cliente:clientes(id, nombre),
+        proveedor:proveedores(id, nombre)
+      `)
+      .eq('tipo', tipo);
+
+    // Filtro de fechas opcional
+    if (desde) query = query.gte('fecha', desde);
+    if (hasta) query = query.lte('fecha', hasta);
+
+    let { data, error } = await query.order('fecha', { ascending: false });
+    if (error) throw error;
+
+    // Filtro por nombre (cliente o proveedor)
+    if (nombre) {
+      const lowerNombre = nombre.toLowerCase();
+      data = data.filter(r =>
+        (r.cliente && r.cliente.nombre?.toLowerCase().includes(lowerNombre)) ||
+        (r.proveedor && r.proveedor.nombre?.toLowerCase().includes(lowerNombre))
+      );
+    }
+
+    // Devuelvo con "nombre" ya resuelto
+    res.json(
+      data.map(r => ({
+        ...r,
+        nombre: r.cliente ? r.cliente.nombre : (r.proveedor ? r.proveedor.nombre : null)
+      }))
+    );
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al buscar recibos.' });
   }
 });
 
