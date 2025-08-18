@@ -5,10 +5,11 @@ const verificarToken = require('../middlewares/authMiddleware');
 
 // Crear factura con ítems
 router.post('/', verificarToken, async (req, res) => {
-  const { numero, fecha, tipo, tipo_f, cliente_id, proveedor_id, detalles } = req.body;
+  const { numero, fecha, tipo, tipo_f, cliente_id, proveedor_id, detalles, total1 } = req.body;
   const items = detalles || [];
 
-  if (!numero || !fecha || !tipo || !tipo_f || !items.length) {
+  if (!fecha || !tipo || !tipo_f ) {
+    
     return res.status(400).json({ error: 'Faltan datos obligatorios o no hay ítems.' });
   }
 
@@ -30,11 +31,20 @@ router.post('/', verificarToken, async (req, res) => {
   if (tipo === 'compra' && !proveedor_id) {
     return res.status(400).json({ error: 'proveedor_id requerido para tipo "compra".' });
   }
-
-  const subtotal = items.reduce((acc, item) => acc + item.cantidad * item.precio, 0);
-  const iva = subtotal * 0.21;
-  const total = subtotal + iva;
-
+let total;
+let subtotal;
+let iva;
+  if(tipo_f === "saldo inicial"){
+    total = total1;
+    subtotal=0;
+    iva=0;
+  }else{
+  subtotal = items.reduce((acc, item) => acc + item.cantidad * item.precio, 0);
+  iva = subtotal * 0.21;
+  total = subtotal + iva;
+  console.log("no")
+  console.log(tiposFValidos)
+}
   try {
     // Insertar factura
     const { data: facturaData, error: facturaError } = await supabase
