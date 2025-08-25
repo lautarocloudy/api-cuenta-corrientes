@@ -5,7 +5,7 @@ const verificarToken = require('../middlewares/authMiddleware');
 
 // Crear factura con ítems
 router.post('/', verificarToken, async (req, res) => {
-  const { numero, fecha, tipo, tipo_f, cliente_id, proveedor_id, detalles, total1 } = req.body;
+  const { numero, fecha, tipo, tipo_f, cliente_id, proveedor_id, detalles, total1, subtotalNeto, montoIVA, total_factura } = req.body;
   const items = detalles || [];
 
   if (!fecha || !tipo || !tipo_f ) {
@@ -39,11 +39,9 @@ let iva;
     subtotal=0;
     iva=0;
   }else{
-  subtotal = items.reduce((acc, item) => acc + item.cantidad * item.precio, 0);
-  iva = subtotal * 0.21;
-  total = subtotal + iva;
-  console.log("no")
-  console.log(tiposFValidos)
+  iva = montoIVA;
+  subtotal = subtotalNeto;
+  total = total_factura
 }
   try {
     // Insertar factura
