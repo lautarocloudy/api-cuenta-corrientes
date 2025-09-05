@@ -32,7 +32,7 @@ router.get('/clientes', verificarToken, async (req, res) => {
     facturas.forEach(f => {
       const clienteId = f.cliente_id;
       if (!facturadoMap[clienteId]) facturadoMap[clienteId] = 0;
-      if (f.tipo_f === 'factura' || f.tipo_f === 'nota de débito') {
+      if (f.tipo_f === 'factura' || f.tipo_f === 'nota de débito' || f.tipo_f === 'saldo inicial') {
         facturadoMap[clienteId] += parseFloat(f.total);
       } else if (f.tipo_f === 'nota de crédito') {
         facturadoMap[clienteId] -= parseFloat(f.total);
