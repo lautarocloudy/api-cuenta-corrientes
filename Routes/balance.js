@@ -69,6 +69,105 @@ router.get('/clientes', verificarToken, async (req, res) => {
   }
 });
 
+// buscar balence por cliente
+router.get('/balance-clientes', verificarToken, async (req, res) => {
+  try {
+    const { nombre, hasta } = req.query;
+
+    // Validación: ambos son obligatorios
+    if (!nombre || !hasta) {
+      return res.status(400).json({
+        error: "Debe enviar 'nombre' y 'hasta' en la consulta"
+      });
+    } 
+
+    // =======================
+    // CLIENTES (filtro por nombre obligatorio)
+    // =======================
+    let query = supabase.from('clientes').select('id, nombre');
+    query = query.ilike('nombre', `%${nombre}%`); // siempre aplica el filtro
+
+    const { data: clientes, error: clientesError } = await query;
+    if (clientesError) throw clientesError;
+
+    if (!clientes.length) {
+      return res.json([]);
+    }
+
+    // =======================
+    // Ajuste de fecha hasta
+    // =======================
+    const fechaHasta = `${hasta} 23:59:59`;
+
+    // =======================
+    // FACTURAS
+    // =======================
+    const { data: facturas, error: facturasError } = await supabase
+      .from('facturas')
+      .select('cliente_id, tipo_f, total, tipo, fecha')
+      .eq('tipo', 'venta')
+      .lte('fecha', fechaHasta);
+    if (facturasError) throw facturasError;
+
+    // =======================
+    // COBROS
+    // =======================
+    const { data: cobros, error: cobrosError } = await supabase
+      .from('recibos')
+      .select('cliente_id, total, tipo, fecha')
+      .eq('tipo', 'cobro')
+      .lte('fecha', fechaHasta);
+    if (cobrosError) throw cobrosError;
+
+    // =======================
+    // MAPEO FACTURAS
+    // =======================
+    const facturadoMap = {};
+    facturas.forEach(f => {
+      const clienteId = f.cliente_id;
+      if (!facturadoMap[clienteId]) facturadoMap[clienteId] = 0;
+      if (['factura', 'nota de débito', 'saldo inicial'].includes(f.tipo_f)) {
+        facturadoMap[clienteId] += parseFloat(f.total);
+      } else if (f.tipo_f === 'nota de crédito') {
+        facturadoMap[clienteId] -= parseFloat(f.total);
+      }
+    });
+
+    // =======================
+    // MAPEO COBROS
+    // =======================
+    const cobradoMap = {};
+    cobros.forEach(c => {
+      const clienteId = c.cliente_id;
+      if (!cobradoMap[clienteId]) cobradoMap[clienteId] = 0;
+      cobradoMap[clienteId] += parseFloat(c.total);
+    });
+
+    // =======================
+    // RESULTADO FINAL
+    // =======================
+    const resultado = clientes.map(c => {
+      const total_facturado = facturadoMap[c.id] || 0;
+      const total_cobrado = cobradoMap[c.id] || 0;
+      const saldo = parseFloat((total_facturado - total_cobrado).toFixed(2));
+
+      return {
+        id: c.id,
+        nombre: c.nombre,
+        total_facturado,
+        total_cobrado,
+        saldo
+      };
+    });
+
+    res.json(resultado);
+  } catch (err) {
+    console.error('Error balance clientes:', err.message);
+    res.status(500).json({ error: 'Error al calcular balance de clientes' });
+  }
+});
+
+
 // Balance de proveedores
 router.get('/proveedores', verificarToken, async (req, res) => {
   try {
